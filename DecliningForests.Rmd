@@ -1,0 +1,302 @@
+---
+title: "Global Declining Tree Cover"
+author: 'Jillian Hall'
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    theme: yeti
+---
+
+```{r setup, include=FALSE}
+#loading in all the packages I may need 
+library(flexdashboard)
+library(readr)
+library(dplyr)
+library(knitr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(rnaturalearth)
+library(sf)
+library(tinytable)
+
+#importing data via URL using readr
+#renamed long column names 
+URL<-"https://ourworldindata.org/grapher/proportion-of-forest-area-with-long-term-management-plan.csv?v=1&csvType=full&useColumnShortNames=true"
+forest_manag<-read_csv(URL)
+forest_manag<-forest_manag%>%rename(country=entity,forestmgt='_15_2_1__ag_lnd_frstmgt')
+
+URL2<-"https://ourworldindata.org/grapher/tree-cover-loss.csv?v=1&csvType=full&useColumnShortNames=true"
+tree_loss<-read_csv(URL2)
+tree_loss<-tree_loss%>%rename(tree_cover_loss=tree_cover_loss_ha__category_total,country=entity)
+
+URL3<-"https://ourworldindata.org/grapher/tree-cover-loss-by-dominant-driver.csv?v=1&csvType=full&useColumnShortNames=true"
+loss_driver<-read_csv(URL3)
+loss_driver<-loss_driver%>%rename(settlement_infrastructure=tree_cover_loss_ha__category_settlements__and__infrastructure,hard_commodities=tree_cover_loss_ha__category_hard_commodities,natural_disturbances=tree_cover_loss_ha__category_other_natural_disturbances,shifting_cultivation=tree_cover_loss_ha__category_shifting_cultivation,logging=tree_cover_loss_ha__category_logging,permanent_agriculture=tree_cover_loss_ha__category_permanent_agriculture,wildfire=tree_cover_loss_ha__category_wildfire,country=entity)
+
+```
+
+# The Challenge: Global Forest Loss
+
+## Left Column
+
+### Declining Global Tree Cover
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#filtering global tree cover data for the row "world"
+worldtreeloss<-tree_loss%>%filter(country=="World")
+
+#making tree cover loss represent Mha for better visualization
+worldtreecover<-worldtreeloss%>%mutate(Ha_millions=tree_cover_loss/1000000)
+
+#finding the total tree cover loss for 2001-2024
+worldtreecover<-worldtreecover%>%group_by(country)%>%summarise(total_loss=sum(Ha_millions))
+```
+
+Global forests are essential for climate regulation, biodiversity, and human livelihoods, yet they continue to decline worldwide. Although roughly **4.06 billion hectares** of forest remain, nearly one-third of global forest cover has already been lost.
+Satellite data show that between 2001 and 2024, the world lost approximately **515 million hectares** of tree cover, an area about half the size of the United States. Understanding where and why this loss occurs is central to achieving **Sustainable Development Goal 15**, which aims to protect and restore terrestrial ecosystems. 
+
+### Figure {.no-padding}
+
+```{r fig.height=13, fig.width=19, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#adding column for Mha to original data set 
+tree_loss<-tree_loss%>%mutate(Ha_millions=tree_cover_loss/1000000)
+
+#filtering data set to remove codes that dont coordinate to a country
+#also making total loss of Mha column 
+tree_loss1<-tree_loss%>%filter(nchar(code)==3)%>% group_by(country,code)%>%summarise(total_loss=sum(Ha_millions,na.rm=TRUE))%>%ungroup()
+
+#making map that will be the base of the figure 
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+#joining the map with the tree loss data by country code 
+map_data<- world %>%left_join(tree_loss1, by = c("iso_a3" = "code"))
+
+#making plot that shows total tree loss from 2001-2024 using geom_sf and saving it as an object 
+treeworld<-ggplot(map_data)+geom_sf(aes(fill=total_loss,label=name), color = "grey29") +
+  scale_fill_gradient(
+    low="darkgreen",
+    high= "honeydew",
+    name = "Mha",
+    na.value = "grey90")+
+  labs(
+    title = "Tree cover loss is concentrated in a small number of countries, highlighting where \n SDG 15 efforts may have the greatest global impact."
+  )+theme_void(base_size =12)
+#making an interactive plot 
+ggplotly(treeworld)
+
+```
+
+## right column
+
+### Importance of Forests
+
+Forests provide critical ecosystem services, including carbon storage, climate regulation, and resources that support human well-being worldwide. The global value of these services has been estimated at **$16.2 trillion annually**, highlighting the environmental and economic consequences of continued forest loss. (Costanza et al., 2014).
+
+### Lead Contributors {.no-padding}
+
+```{r, message=FALSE, warning=FALSE, paged.print=FALSE}
+#selecting country and total loss column from data set 
+tree_loss2<-tree_loss1%>%select(country,total_loss)
+
+#renaming columns to make table look more professional
+tree_loss2<-tree_loss2%>%rename(Country=country,'Total Loss'=total_loss)
+
+#arranging the total loss in descending order while only taking the top five rows 
+tree_loss2 %>% arrange(desc(`Total Loss`))%>%slice(1:5)%>%tt(caption="Countries Driving the Largest Share of Global Forest Loss (2001-2024)")
+
+```
+
+# Why Forests Are Disappearing
+
+## Left column
+
+### Drivers of Tree Cover Loss Through the Years {.no-padding}
+
+```{r fig.height=6, fig.width=5}
+#filtering the drivers of tree loss data set for "world" rows
+worlddrivers<-loss_driver%>%filter(country=='World')
+
+#making the data set longer putting individual driver columns under one overall driver column 
+worlddriverlong<-worlddrivers%>%
+  pivot_longer(cols=settlement_infrastructure:wildfire,names_to = "driver",values_to ="ha")
+
+# adding a column that mutates ha to be in the millions
+worlddriverlong<-worlddriverlong%>%mutate(ha_mil=ha/1000000)
+
+#reordering drivers to be in acceding order
+worlddriverlong<-worlddriverlong%>%mutate(driver=factor(driver,levels = c("permanent_agriculture",
+    "wildfire",
+    "logging",
+    "shifting_cultivation",
+    "hard_commodities",
+    "settlement_infrastructure",
+    "natural_disturbances")))%>%arrange(driver)
+
+# making this into a graph for driver of tree loss per year and loss of Mha and saving it as an object
+driverplot<-ggplot(worlddriverlong,aes(x=year,y=ha_mil,fill=driver))+
+  geom_area(position='stack',alpha=0.8)+
+  labs(y='Mha',
+       title='Permanent Agricultural expansion consistently drives \n the majority of tree cover loss.')+
+  theme_classic(base_size = 10)
+#making the plot interactive through plotly
+ggplotly(driverplot)
+```
+
+### Temporary vs Permanent {.no-padding}
+
+```{r echo=FALSE, fig.height=5, fig.width=4, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#using the long data and grouping it by country and driver to find the total Mha 
+worlddriverlong<-worlddriverlong%>%group_by(country,driver)%>%summarise(Total=sum(ha_mil))
+
+#ungrouping the long data set and selecting driver and total columns and reordering how the driver column will be presented
+worlddriverlong<-worlddriverlong%>%ungroup()%>%select(driver, Total)%>%mutate(driver=factor(driver,levels=c('permanent_agriculture','hard_commodities','settlement_infrastructure','logging','wildfire','shifting_cultivation','natural_disturbances')))%>%arrange(driver)
+
+#making a tiny table of loss per driver but grouping them by temporary or permenant effects and then bolding the group titles 
+worlddriverlong %>%
+  tt(caption = "Most Tree Cover Loss Results from Permanent Land-Use Change") %>%
+  group_tt(i = list(
+    "Permanent" = 1,
+    "Temporary" = 4
+  ))%>%
+  style_tt(
+    i = c(1, 5),
+    bold = TRUE
+  )
+  
+```
+
+## Right column
+
+### Figure {.no-padding}
+
+```{r fig.height=11, fig.width=8}
+#making a world drivers total data set grouping by country and finding the total ha per each driver with summaries 
+worlddrivertotal<-worlddrivers%>%
+  group_by(country)%>%
+  summarise(total_cultivation=sum(shifting_cultivation),
+            total_logging=sum(logging),
+            total_infrastructure=sum(settlement_infrastructure),
+            total_wildfire=sum(wildfire),
+            total_commodities=sum(hard_commodities),
+            total_natural=sum(natural_disturbances),
+            total_agri=sum(permanent_agriculture))
+
+#mutating the total columns to present Mha for better visualizations 
+worlddrivertotal<-worlddrivertotal%>%mutate(total_logging=total_logging/1000000, total_infrastructure=total_infrastructure/1000000,total_cultivation=total_cultivation/1000000,total_wildfire=total_wildfire/1000000,total_commodities=total_commodities/1000000,total_natural=total_natural/1000000,total_agri=total_agri/1000000)
+
+#renaming the total ha per driver columns to look better when put into a visualization using rename function. 
+worlddrivertotal<-worlddrivertotal%>%rename(Logging=total_logging,'Shifting Cultivation'=total_cultivation,Infrastructure=total_infrastructure,'Natural Disturbance'=total_natural,'Hard Commodities'=total_commodities,Wildfire=total_wildfire,'Permanent Agriculture'=total_agri,Scale=country)
+
+#making a column with the overall total of all tree loss ha from drivers using group by each driver and country and summaries for sum of all drivers
+worldtotal<-worlddrivertotal%>%
+  group_by(Scale,Logging,Infrastructure,`Natural Disturbance`,Wildfire,`Permanent Agriculture`,`Hard Commodities`,`Shifting Cultivation`)%>%
+  summarise(Total=sum(Logging,Infrastructure,`Natural Disturbance`,Wildfire,`Permanent Agriculture`,`Hard Commodities`,`Shifting Cultivation`))
+
+#making a pie chart of the contribution of each driver to the total Mha from 2001-2024 using plotly 
+plot_ly(worlddriverlong,labels=~driver, values = ~Total, type = 'pie')%>%layout(title='Agriculture and Fire Account for the Majority of Global Tree Cover Loss')
+
+```
+
+### Lead Drivers
+
+Global tree cover loss is driven primarily by **permanent land-use change**, especially agricultural expansion. While wildfire, logging, and shifting cultivation also contribute, these are often **temporary** and may allow forests to regrow. The dominance of permanent conversion highlights a key challenge for SDG 15: preventing deforestation is often more effective than restoring forests after they are lost. 
+(Sims et al., 2025)
+
+# Pathways Toward SDG 15
+
+## top
+
+### Progress {.no-padding}
+
+**Percent of global forests under long term sustainable management plans:**
+
+```{r}
+#using gauge to show percent of forest under management and setting color to midnight blue to look more uniform 
+gauge(58,min=0,max=100,symbol='%',gaugeSectors(success=c(0,100),colors='midnightblue'))
+```
+
+This represents a slight increase over recent decades, reflecting growing global adoption of sustainable forest policies.
+
+### Long-Term Managment {.no-padding}
+
+```{r fig.height=13, fig.width=20}
+#using filter function to find the total forest under management today or in 2020 when the data ends 
+forest2020<-forest_manag%>%filter(year==2020)
+
+#preparing data to be mapped by filtering for codes that dont coordinate to a country and saving it as an new object
+forest2020edited<-forest2020%>%filter(nchar(code) == 3)
+
+#setting up the base from which the data will be mapped on 
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+#joining the world and forest2020edited data sets by country codes accounting for non spatial data
+map_data2 <- world %>%
+  left_join(forest2020edited, by = c("iso_a3" = "code")) %>%
+  filter(!sf::st_is_empty(geometry))
+
+# accounting for differences in geometry 
+map_data2 <- sf::st_cast(map_data2, "MULTIPOLYGON")
+
+#making map of forest percentage under management and saving it as an object
+manageworld<-ggplot(map_data2) +
+  geom_sf(aes(fill = forestmgt,label=name), color = "grey29") +
+  scale_fill_gradient(
+    low="aliceblue",
+    high= "midnightblue",
+    name="Percent of Forests",
+    na.value ="grey90")+
+  labs(
+    title = "Sustainable Forest Management Is Expanding but Uneven Across Regions")+theme_void(base_size = 10)
+#making the map interactive 
+ggplotly(manageworld)
+```
+
+## column
+
+### Lead Contributors
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#using filter function to find the total forest under management today or in 2020 when the data ends 
+forest2020<-forest_manag%>%filter(year==2020)
+#filtering forest 2020 data set previously created for the top five contributors to tree cover loss 
+forests2020<-forest2020%>%filter(country%in%c("Russia","Brazil","Canada","United States","Indonesia"))
+
+#making a tiny table selecting only country and forest management percentage and adding a caption 
+forests2020%>%select(country,forestmgt)%>%tt(caption="Major Forest-Loss Countries Show Mixed Progress in Sustainable Management.")
+
+```
+
+### What This Means for SDG 15:
+Global forest loss remains high, but the drivers are well understood and proven solutions already exist, making SDG 15 a challenge of implementation rather than discovery.
+
+## 2 row {.tabset .tabset-fade}
+
+### Solutions
+
+Because forest loss has multiple causes, effective solutions must combine policy, sustainable management, and community involvement. Key approaches include:
+
+- Reducing agricultural expansion 
+- Promoting sustainable forestry 
+- Improving wildfire management 
+- Strengthening land and resource rights 
+- Supporting restoration and conservation planning 
+
+(Sims et al., 2025) (Reek et al., 2026)
+
+### Successes
+
+**Vietnam** reversed decades of forest loss through large-scale restoration programs, increasing forest cover even as agriculture expanded.
+
+**Tanzania** reduced harvesting below forest growth rates by linking sustainable forest management with poverty-reduction policies.
+
+**Guyana** maintained low deforestation through an international partnership with Norway that financially rewards conservation.
+
+**Madagascar** established a protected forest corridor managed by local communities, reducing emissions while supporting livelihoods.
+
+(Boucher et al., 2014)
+
