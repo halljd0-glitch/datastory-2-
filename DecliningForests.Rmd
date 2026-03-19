@@ -16,9 +16,6 @@ library(knitr)
 library(tidyr)
 library(ggplot2)
 library(plotly)
-library(leaflet)
-library(rnaturalearth)
-library(sf)
 library(tinytable)
 
 #importing data via URL using readr
@@ -66,24 +63,28 @@ tree_loss<-tree_loss%>%mutate(Ha_millions=tree_cover_loss/1000000)
 
 #filtering data set to remove codes that dont coordinate to a country
 #also making total loss of Mha column 
-tree_loss1<-tree_loss%>%filter(nchar(code)==3)%>% group_by(country,code)%>%summarise(total_loss=sum(Ha_millions,na.rm=TRUE))%>%ungroup()
-
-#making map that will be the base of the figure 
-world <- ne_countries(scale = "medium", returnclass = "sf")
-
-#joining the map with the tree loss data by country code 
-map_data<- world %>%left_join(tree_loss1, by = c("iso_a3" = "code"))
+tree_loss1 <- tree_loss %>%
+  filter(nchar(code) == 3) %>%
+  group_by(country) %>%
+  summarise(total_loss = sum(Ha_millions, na.rm = TRUE)) %>%
+  ungroup()
+# Top 20 countries
+top_loss <- tree_loss1 %>%
+  arrange(desc(total_loss)) %>%
+  slice(1:20)
 
 #making plot that shows total tree loss from 2001-2024 using geom_sf and saving it as an object 
-treeworld<-ggplot(map_data)+geom_sf(aes(fill=total_loss,label=name), color = "grey29") +
-  scale_fill_gradient(
-    low="darkgreen",
-    high= "honeydew",
-    name = "Mha",
-    na.value = "grey90")+
+treeworld <- ggplot(top_loss, aes(x = reorder(country, total_loss), y = total_loss)) +
+  geom_col(fill = "darkgreen") +
+  coord_flip() +
   labs(
-    title = "Tree cover loss is concentrated in a small number of countries, highlighting where \n SDG 15 efforts may have the greatest global impact."
-  )+theme_void(base_size =12)
+    x = "",
+    y = "Million hectares lost",
+    title = "Tree cover loss is concentrated in a small number of countries",
+    subtitle = "Top 20 countries account for the majority of global loss (2001–2024)"
+  ) +
+  theme_minimal()
+
 #making an interactive plot 
 ggplotly(treeworld)
 
@@ -153,7 +154,7 @@ ggplotly(driverplot)
 worlddriverlong<-worlddriverlong%>%group_by(country,driver)%>%summarise(Total=sum(ha_mil))
 
 #ungrouping the long data set and selecting driver and total columns and reordering how the driver column will be presented
-worlddriverlong<-worlddriverlong%>%ungroup()%>%select(driver, Total)%>%mutate(driver=factor(driver,levels=c('permanent_agriculture','hard_commodities','settlement_infrastructure','logging','wildfire','shifting_cultivation','natural_disturbances')))%>%arrange(driver)
+worlddriverlong<-worlddriverlong%>%ungroup()%>%select(country,driver, Total)%>%mutate(driver=factor(driver,levels=c('permanent_agriculture','hard_commodities','settlement_infrastructure','logging','wildfire','shifting_cultivation','natural_disturbances')))%>%arrange(driver)
 
 #making a tiny table of loss per driver but grouping them by temporary or permenant effects and then bolding the group titles 
 worlddriverlong %>%
@@ -173,7 +174,7 @@ worlddriverlong %>%
 
 ### Figure {.no-padding}
 
-```{r fig.height=11, fig.width=8}
+```{r fig.height=15, fig.width=9}
 #making a world drivers total data set grouping by country and finding the total ha per each driver with summaries 
 worlddrivertotal<-worlddrivers%>%
   group_by(country)%>%
@@ -191,14 +192,29 @@ worlddrivertotal<-worlddrivertotal%>%mutate(total_logging=total_logging/1000000,
 #renaming the total ha per driver columns to look better when put into a visualization using rename function. 
 worlddrivertotal<-worlddrivertotal%>%rename(Logging=total_logging,'Shifting Cultivation'=total_cultivation,Infrastructure=total_infrastructure,'Natural Disturbance'=total_natural,'Hard Commodities'=total_commodities,Wildfire=total_wildfire,'Permanent Agriculture'=total_agri,Scale=country)
 
-#making a column with the overall total of all tree loss ha from drivers using group by each driver and country and summaries for sum of all drivers
-worldtotal<-worlddrivertotal%>%
-  group_by(Scale,Logging,Infrastructure,`Natural Disturbance`,Wildfire,`Permanent Agriculture`,`Hard Commodities`,`Shifting Cultivation`)%>%
-  summarise(Total=sum(Logging,Infrastructure,`Natural Disturbance`,Wildfire,`Permanent Agriculture`,`Hard Commodities`,`Shifting Cultivation`))
 
-#making a pie chart of the contribution of each driver to the total Mha from 2001-2024 using plotly 
-plot_ly(worlddriverlong,labels=~driver, values = ~Total, type = 'pie')%>%layout(title='Agriculture and Fire Account for the Majority of Global Tree Cover Loss')
 
+#making the data set long 
+worlddrivers_clean <- worlddrivertotal %>%
+  filter(Scale == "World") %>%
+  pivot_longer(
+    cols = 'Shifting Cultivation':'Permanent Agriculture',
+    names_to = "driver",
+    values_to = "total"
+  )
+#ploting the drivers precentage 
+driversprecent<-ggplot(worlddrivers_clean, aes(x = reorder(driver, total), y = total,color=driver,fill=driver)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Permanent agriculture dominates global tree cover loss",
+    subtitle = "Total loss by driver, 2001–2024",
+    x = "",
+    y = "Million hectares"
+  ) +
+  theme_minimal()+theme(legend.position = "none")
+#making the plot interactive
+ggplotly(driversprecent)
 ```
 
 ### Lead Drivers
@@ -224,35 +240,32 @@ This represents a slight increase over recent decades, reflecting growing global
 ### Long-Term Managment {.no-padding}
 
 ```{r fig.height=13, fig.width=20}
-#using filter function to find the total forest under management today or in 2020 when the data ends 
-forest2020<-forest_manag%>%filter(year==2020)
+#pulling top leaders of Forest declines
+top_loss <- tree_loss1 %>%
+  arrange(desc(total_loss)) %>%
+  slice(1:10)
 
-#preparing data to be mapped by filtering for codes that dont coordinate to a country and saving it as an new object
-forest2020edited<-forest2020%>%filter(nchar(code) == 3)
+#pulling current or most recent precentage or forests under managment
+forest2020 <- forest_manag %>%
+  filter(year == 2020)
 
-#setting up the base from which the data will be mapped on 
-world <- ne_countries(scale = "medium", returnclass = "sf")
+#joining the data sets to make the top leaders of declines forests under managment %
+loss_vs_manage <- top_loss %>%
+  left_join(forest2020, by = "country")
 
-#joining the world and forest2020edited data sets by country codes accounting for non spatial data
-map_data2 <- world %>%
-  left_join(forest2020edited, by = c("iso_a3" = "code")) %>%
-  filter(!sf::st_is_empty(geometry))
-
-# accounting for differences in geometry 
-map_data2 <- sf::st_cast(map_data2, "MULTIPOLYGON")
-
-#making map of forest percentage under management and saving it as an object
-manageworld<-ggplot(map_data2) +
-  geom_sf(aes(fill = forestmgt,label=name), color = "grey29") +
-  scale_fill_gradient(
-    low="aliceblue",
-    high= "midnightblue",
-    name="Percent of Forests",
-    na.value ="grey90")+
+#making and saving the plot of precentage of forest under managment 
+topmanage<-ggplot(loss_vs_manage, aes(x = reorder(country, forestmgt), y = forestmgt)) +
+  geom_col(fill="midnightblue") +
+  coord_flip() +
   labs(
-    title = "Sustainable Forest Management Is Expanding but Uneven Across Regions")+theme_void(base_size = 10)
-#making the map interactive 
-ggplotly(manageworld)
+    title = "Countries with the greatest forest loss often have low management coverage",
+    subtitle = "Forest area under long-term management plans (%)",
+    x = "",
+    y = "Percent of forests under management"
+  ) +
+  theme_minimal()
+#making the plot interactive
+ggplotly(topmanage)
 ```
 
 ## column
