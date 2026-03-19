@@ -2,4 +2,5 @@
 
 Global forest are declining but Sustainable Development Goal 15 offers some hope into protecting and restoring terrestrial ecosystems. 
 
-file:///Users/jillianhall/repos/Global_Tree_Cover/datastory-2-/Index.html
+
+https://halljd0-glitch.github.io/datastory-2-/ 
